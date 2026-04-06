@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mvn *)",
+      "Bash(./mvnw *)",
+      "Bash(gradle *)",
+      "Bash(./gradlew *)",
+      "Bash(java *)",
+      "Bash(javac *)",
+      "Bash(git *)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "file=$(jq -r '.tool_input.file_path // .tool_input.new_file_path // empty'); if echo \"$file\" | grep -qE '\\.java$' && [ -f \"$file\" ]; then if command -v google-java-format &>/dev/null; then google-java-format --replace \"$file\" 2>/dev/null || true; fi; fi"
+          }
+        ]
+      }
+    ]
+  }
+}
