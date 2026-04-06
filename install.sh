@@ -2,25 +2,25 @@
 # install.sh — Install a Claude Code profile into a target project
 #
 # Usage:
-#   ./install.sh --profile <python|typescript|java> [target-dir]
-#   ./install.sh --profile python          # installs into current directory
-#   ./install.sh --profile typescript .    # same
+#   ./install.sh [--profile <default|python|typescript|java>] [target-dir]
+#   ./install.sh                           # installs default profile into current directory
+#   ./install.sh --profile python          # installs python profile into current directory
 #   ./install.sh --profile java ~/myproject --force  # overwrite existing files
 #
 # Options:
-#   --profile   Profile to install (required): python, typescript, java
+#   --profile   Profile to install (default: "default"): default, python, typescript, java
 #   --force     Overwrite existing files (default: skip existing)
 #   --help      Show this help
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VALID_PROFILES=("python" "typescript" "java")
+VALID_PROFILES=("default" "python" "typescript" "java")
 
 # ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
-PROFILE=""
+PROFILE="default"
 TARGET="."
 FORCE=false
 
@@ -52,12 +52,6 @@ done
 # ---------------------------------------------------------------------------
 # Validation
 # ---------------------------------------------------------------------------
-if [[ -z "$PROFILE" ]]; then
-  echo "Error: --profile is required." >&2
-  echo "  Usage: $0 --profile <$(IFS='|'; echo "${VALID_PROFILES[*]}")> [target-dir]" >&2
-  exit 1
-fi
-
 valid=false
 for p in "${VALID_PROFILES[@]}"; do
   [[ "$PROFILE" == "$p" ]] && valid=true && break
