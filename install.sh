@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
-# install.sh — Install a Claude Code profile into a target project
+# install.sh — Install a Claude Code profile and/or commands into a target project
 #
 # Usage:
-#   ./install.sh [--profile <default|python|typescript|java>] [target-dir]
-#   ./install.sh                           # installs default profile into current directory
-#   ./install.sh --profile python          # installs python profile into current directory
+#   ./install.sh [--profile <default|python|typescript|java>] [--commands [name,...]] [target-dir]
+#   ./install.sh                                # installs default profile into current directory
+#   ./install.sh --profile python               # installs python profile into current directory
+#   ./install.sh --commands                     # installs all commands into current directory
+#   ./install.sh --commands github              # installs only the 'github' command
+#   ./install.sh --profile python --commands    # installs profile + all commands
 #   ./install.sh --profile java ~/myproject --force  # overwrite existing files
 #
 # Options:
 #   --profile   Profile to install (default: "default"): default, python, typescript, java
+#   --commands  Install slash commands into .claude/commands/ (optional comma-separated list)
 #   --force     Overwrite existing files (default: skip existing)
 #   --help      Show this help
 
@@ -20,9 +24,11 @@ VALID_PROFILES=("default" "python" "typescript" "java")
 # ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
-PROFILE="default"
+PROFILE=""
 TARGET="."
 FORCE=false
+INSTALL_COMMANDS=false
+COMMANDS_FILTER=""  # empty = all; comma-separated names = specific commands
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -30,12 +36,21 @@ while [[ $# -gt 0 ]]; do
       PROFILE="$2"
       shift 2
       ;;
+    --commands)
+      INSTALL_COMMANDS=true
+      # Optional next arg: comma-separated command names (not a path or existing dir)
+      if [[ $# -gt 1 && "$2" != -* && "$2" != /* && "$2" != ./* && "$2" != ~* && "$2" != "." && "$2" != ".." && ! -d "$2" ]]; then
+        COMMANDS_FILTER="$2"
+        shift
+      fi
+      shift
+      ;;
     --force)
       FORCE=true
       shift
       ;;
     --help|-h)
-      head -10 "$0" | grep '^#' | sed 's/^# \{0,1\}//'
+      head -17 "$0" | grep '^#' | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     -*)
@@ -49,23 +64,38 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Default: install profile if no explicit flags were set
+if [[ -z "$PROFILE" && "$INSTALL_COMMANDS" == false ]]; then
+  PROFILE="default"
+elif [[ -z "$PROFILE" && "$INSTALL_COMMANDS" == true ]]; then
+  : # commands-only mode; no profile install
+fi
+
 # ---------------------------------------------------------------------------
 # Validation
 # ---------------------------------------------------------------------------
-valid=false
-for p in "${VALID_PROFILES[@]}"; do
-  [[ "$PROFILE" == "$p" ]] && valid=true && break
-done
-if [[ "$valid" == false ]]; then
-  echo "Error: unknown profile '$PROFILE'. Valid options: ${VALID_PROFILES[*]}" >&2
+if [[ -n "$PROFILE" ]]; then
+  valid=false
+  for p in "${VALID_PROFILES[@]}"; do
+    [[ "$PROFILE" == "$p" ]] && valid=true && break
+  done
+  if [[ "$valid" == false ]]; then
+    echo "Error: unknown profile '$PROFILE'. Valid options: ${VALID_PROFILES[*]}" >&2
+    exit 1
+  fi
+fi
+
+PROFILE_DIR="$SCRIPT_DIR/profiles/${PROFILE:-}"
+COMMON_DIR="$SCRIPT_DIR/common"
+COMMANDS_DIR="$SCRIPT_DIR/commands"
+
+if [[ -n "$PROFILE" && ! -d "$PROFILE_DIR" ]]; then
+  echo "Error: profile directory not found: $PROFILE_DIR" >&2
   exit 1
 fi
 
-PROFILE_DIR="$SCRIPT_DIR/profiles/$PROFILE"
-COMMON_DIR="$SCRIPT_DIR/common"
-
-if [[ ! -d "$PROFILE_DIR" ]]; then
-  echo "Error: profile directory not found: $PROFILE_DIR" >&2
+if [[ "$INSTALL_COMMANDS" == true && ! -d "$COMMANDS_DIR" ]]; then
+  echo "Error: commands directory not found: $COMMANDS_DIR" >&2
   exit 1
 fi
 
@@ -109,42 +139,73 @@ copy_dir() {
 # ---------------------------------------------------------------------------
 # Install
 # ---------------------------------------------------------------------------
-echo "Installing Claude Code profile: $PROFILE → $TARGET"
-echo ""
-
 CLAUDE_DIR="$TARGET/.claude"
-mkdir -p "$CLAUDE_DIR/rules"
 
-# 1. Common rules (git.md etc.)
-copy_dir "$COMMON_DIR/rules" "$CLAUDE_DIR/rules"
+if [[ -n "$PROFILE" ]]; then
+  echo "Installing Claude Code profile: $PROFILE → $TARGET"
+  echo ""
 
-# 2. Profile settings.json
-copy_file "$PROFILE_DIR/settings.json" "$CLAUDE_DIR/settings.json"
+  mkdir -p "$CLAUDE_DIR/rules"
 
-# 3. Profile CLAUDE.md
-copy_file "$PROFILE_DIR/CLAUDE.md" "$CLAUDE_DIR/CLAUDE.md"
+  # 1. Common rules (git.md etc.)
+  copy_dir "$COMMON_DIR/rules" "$CLAUDE_DIR/rules"
 
-# 4. Profile rules/
-copy_dir "$PROFILE_DIR/rules" "$CLAUDE_DIR/rules"
+  # 2. Profile settings.json
+  copy_file "$PROFILE_DIR/settings.json" "$CLAUDE_DIR/settings.json"
 
-# 5. Templates — offer to copy if target file doesn't exist
-if [[ -d "$PROFILE_DIR/templates" ]]; then
-  while IFS= read -r -d '' src_file; do
-    local_name="$(basename "$src_file")"
-    dest_file="$TARGET/$local_name"
-    if [[ ! -f "$dest_file" ]]; then
-      read -r -p "  Copy template '$local_name' to project root? [y/N] " yn || yn=""
-      case "$yn" in
-        [Yy]*)
-          cp "$src_file" "$dest_file"
-          OFFERED+=("$local_name (copied)")
-          ;;
-        *)
-          OFFERED+=("$local_name (skipped)")
-          ;;
-      esac
-    fi
-  done < <(find "$PROFILE_DIR/templates" -type f -print0)
+  # 3. Profile CLAUDE.md
+  copy_file "$PROFILE_DIR/CLAUDE.md" "$CLAUDE_DIR/CLAUDE.md"
+
+  # 4. Profile rules/
+  copy_dir "$PROFILE_DIR/rules" "$CLAUDE_DIR/rules"
+
+  # 5. Templates — offer to copy if target file doesn't exist
+  if [[ -d "$PROFILE_DIR/templates" ]]; then
+    while IFS= read -r -d '' src_file; do
+      local_name="$(basename "$src_file")"
+      dest_file="$TARGET/$local_name"
+      if [[ ! -f "$dest_file" ]]; then
+        read -r -p "  Copy template '$local_name' to project root? [y/N] " yn || yn=""
+        case "$yn" in
+          [Yy]*)
+            cp "$src_file" "$dest_file"
+            OFFERED+=("$local_name (copied)")
+            ;;
+          *)
+            OFFERED+=("$local_name (skipped)")
+            ;;
+        esac
+      fi
+    done < <(find "$PROFILE_DIR/templates" -type f -print0)
+  fi
+fi
+
+# 6. Commands → .claude/commands/
+if [[ "$INSTALL_COMMANDS" == true ]]; then
+  echo "Installing commands → $TARGET/.claude/commands/"
+  echo ""
+
+  mkdir -p "$CLAUDE_DIR/commands"
+
+  if [[ -z "$COMMANDS_FILTER" ]]; then
+    # Install all commands
+    while IFS= read -r -d '' src_file; do
+      cmd_name="$(basename "$src_file")"
+      copy_file "$src_file" "$CLAUDE_DIR/commands/$cmd_name"
+    done < <(find "$COMMANDS_DIR" -maxdepth 1 -name "*.md" -print0 | sort -z)
+  else
+    # Install only named commands
+    IFS=',' read -ra CMD_NAMES <<< "$COMMANDS_FILTER"
+    for name in "${CMD_NAMES[@]}"; do
+      name="${name// /}"  # trim spaces
+      src_file="$COMMANDS_DIR/${name}.md"
+      if [[ ! -f "$src_file" ]]; then
+        echo "  Warning: command '$name' not found at $src_file — skipping" >&2
+        continue
+      fi
+      copy_file "$src_file" "$CLAUDE_DIR/commands/${name}.md"
+    done
+  fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -172,6 +233,12 @@ fi
 echo ""
 echo "Next steps:"
 echo "  1. Open '$TARGET' in Claude Code"
-echo "  2. Run /hooks to confirm the PostToolUse hook is active"
-echo "  3. Run /permissions to confirm allowed commands"
-echo "  4. Run /memory to confirm CLAUDE.md and rules loaded"
+if [[ -n "$PROFILE" ]]; then
+  echo "  2. Run /hooks to confirm the PostToolUse hook is active"
+  echo "  3. Run /permissions to confirm allowed commands"
+  echo "  4. Run /memory to confirm CLAUDE.md and rules loaded"
+fi
+if [[ "$INSTALL_COMMANDS" == true ]]; then
+  echo "  • Commands are available as slash commands — e.g. /github"
+  echo "    Run /help to see all available commands"
+fi
