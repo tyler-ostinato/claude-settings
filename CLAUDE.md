@@ -79,3 +79,4 @@ Commands are markdown files in `commands/` that get installed as custom Claude C
 | Command | Description |
 |---------|-------------|
 | `/github` | Stage safe files, create a feature branch, commit, push, and open a PR |
+| `/new-app` | Scaffold a new app for a local kind cluster (namespace, deployment, service, justfile, secrets, PVC, deploy-apps registration) |

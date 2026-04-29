@@ -43,6 +43,7 @@ Commands are reusable Claude Code slash commands installed into `.claude/command
 | Command | What it does |
 |---------|-------------|
 | `/github` | Audit changed files for sensitive data, stage safe files, create a feature branch, write a commit, push, open a PR, and launch it in the browser |
+| `/new-app` | Scaffold a new app for a local kind cluster — namespace, deployment, service, justfile, PVC, secrets wiring, and `deploy-apps` registration |
 
 ### `/github` workflow
 
