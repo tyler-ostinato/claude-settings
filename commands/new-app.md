@@ -19,6 +19,8 @@ Ask the user these questions **all at once** (don't ask one at a time):
 4. **Persistent storage** — Does it need a PVC? (yes/no)
    - If yes: how much storage? (e.g. `5Gi`)
 5. **VPN routing** — Does this app need to route traffic through the nordlynx SOCKS5 proxy? (yes/no)
+6. **Namespace** — Does this app get its own dedicated namespace (the default), or deploy into an existing shared namespace?
+   - If shared: which namespace? (e.g. `home-assistant`)
 
 Wait for all answers before writing any files.
 
@@ -33,19 +35,25 @@ App:       my-app
 Directory: ~/development/my-app/
 Image:     localhost:5001/my-app:dev  (custom Dockerfile)
 Port:      8080
+Namespace: my-app  (own namespace → namespace.yaml created)
 Secrets:   yes  →  my-app-env
 PVC:       yes  →  my-app-data (5Gi)
 VPN:       no
 Files:
-  ~/development/my-app/k8s/namespace.yaml
+  ~/development/my-app/k8s/namespace.yaml     (own namespace only)
   ~/development/my-app/k8s/deployment.yaml
   ~/development/my-app/k8s/service.yaml
   ~/development/my-app/k8s/pvc.yaml          (if PVC)
-  ~/development/my-app/.env.example           (if secrets)
-  ~/development/my-app/Dockerfile             (if custom image)
-  ~/development/my-app/justfile
+  ~/development/my-app/.env.example           (if secrets, if not already present)
+  ~/development/my-app/Dockerfile             (if custom image, if not already present)
+  ~/development/my-app/justfile               (created or edited if already present)
   ~/development/kubernetes/apps/my-app.yaml
   ~/development/kubernetes/justfile           (deploy-apps updated)
+```
+
+For a shared-namespace app the Namespace line would read:
+```
+Namespace: home-assistant  (shared — no namespace.yaml)
 ```
 
 Ask the user to confirm before writing anything.
@@ -54,9 +62,11 @@ Ask the user to confirm before writing anything.
 
 ## Step 3 — Write the files
 
-Use the exact conventions below. Replace `<APP>` with the app name throughout.
+Use the exact conventions below. Replace `<APP>` with the app name and `<NAMESPACE>` with the actual namespace (`<APP>` for own-namespace apps, or the shared namespace name) throughout.
 
-### `~/development/<APP>/k8s/namespace.yaml`
+**Before writing each file**, check whether it already exists. If a file exists (e.g. `justfile`, `.env.example`), **edit it** to incorporate the required changes rather than overwriting it. List any such pre-existing files in the Step 2 plan summary.
+
+### `~/development/<APP>/k8s/namespace.yaml` (own namespace only — skip for shared namespaces)
 ```yaml
 apiVersion: v1
 kind: Namespace
@@ -93,7 +103,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: <APP>
-  namespace: <APP>
+  namespace: <NAMESPACE>
 spec:
   replicas: 1
   selector:
@@ -124,7 +134,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: <APP>
-  namespace: <APP>
+  namespace: <NAMESPACE>
 spec:
   selector:
     app: <APP>
@@ -141,7 +151,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: <APP>-data
-  namespace: <APP>
+  namespace: <NAMESPACE>
 spec:
   accessModes:
     - ReadWriteOnce
@@ -186,7 +196,7 @@ If **secrets**, include a `secret` recipe. Never create a `secret.yaml` file.
 
 cluster       := env("CLUSTER", "kind")
 registry_port := env("REGISTRY_PORT", "5001")
-namespace     := "<APP>"
+namespace     := "<NAMESPACE>"
 
 default:
     @just --list
@@ -214,6 +224,8 @@ secret:
     if [ ! -f ".env" ]; then
         echo "✗ .env not found. Copy .env.example and fill in your values." >&2; exit 1
     fi
+    # Include the next line only if the app has its OWN namespace.
+    # Omit it for shared-namespace apps — the namespace is owned by another app.
     kubectl create namespace "{{namespace}}" --context "kind-{{cluster}}" 2>/dev/null || true
     kubectl create secret generic <APP>-env \
         -n "{{namespace}}" \
@@ -280,7 +292,7 @@ spec:
     path: k8s
   destination:
     server: https://kubernetes.default.svc
-    namespace: <APP>
+    namespace: <NAMESPACE>
   syncPolicy:
     automated:
       prune: true
@@ -292,12 +304,16 @@ spec:
 ## Step 4 — Update `~/development/kubernetes/justfile`
 
 Read the current `deploy-apps` recipe. Add `<APP>` to:
-1. The namespace loop (the `for app in ...` line that runs `kubectl apply -f namespace.yaml`)
-2. The correct deployment group:
+
+1. **Namespace loop** (the `for app in ...` line that runs `kubectl apply -f namespace.yaml`):
+   - **Own namespace only** — add `<APP>` here so the namespace gets created on `deploy-apps`
+   - **Shared namespace** — do NOT add `<APP>` here; the namespace is already owned by another app
+
+2. **Deployment group** — always add `<APP>` to the correct loop:
    - **With secrets**: the loop that runs `just secret && just deploy`
    - **Without secrets**: the loop that runs `just deploy`
 
-Do a minimal edit — only touch the two lines that list app names. Do not restructure the recipe.
+Do a minimal edit — only touch the lines that list app names. Do not restructure the recipe.
 
 ---
 
